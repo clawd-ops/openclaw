@@ -3,6 +3,7 @@ import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { installTerminalAndroidImeFix } from "./terminal-android-ime.ts";
 import { installTerminalAndroidTouchFix } from "./terminal-android-touch.ts";
 import { installTerminalKeyboardReserve } from "./terminal-keyboard-reserve.ts";
+import { installTerminalKeyRow } from "./terminal-key-row.ts";
 
 function isEventListener(value: unknown): value is EventListener {
   return typeof value === "function";
@@ -12,11 +13,15 @@ function isEventListener(value: unknown): value is EventListener {
 export async function createIsolatedGhosttyTerminal(options: CreateGhosttyTerminalOptions) {
   // Android soft-keyboard workarounds for ghostty-web 0.4.0: IME text
   // delivery, touch gesture translation (tap-to-focus, drag-select,
-  // link-tap, paste-menu dismissal), and keyboard-space viewport reserve.
+  // link-tap, paste-menu dismissal), keyboard-space viewport reserve, and
+  // the on-screen Esc/Tab/Ctrl/Alt/arrow/Home/End/PgUp/PgDn key row.
+  // The key row installs first so its modifier interceptor runs ahead of
+  // the IME fix's capture-phase beforeinput listener (capture listeners
+  // fire in registration order), letting an armed Ctrl/Alt swallow the
+  // character instead of it being typed literally as well.
   // Each installs document-level listeners exactly once per page, so
-  // calling all three from every terminal instance's setup path is safe.
-  // See terminal-android-ime.ts / terminal-android-touch.ts /
-  // terminal-keyboard-reserve.ts for the ported shim behavior.
+  // calling them from every terminal instance's setup path is safe.
+  installTerminalKeyRow();
   installTerminalAndroidImeFix();
   installTerminalAndroidTouchFix();
   installTerminalKeyboardReserve();
