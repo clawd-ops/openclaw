@@ -1,0 +1,174 @@
+name: Personal Windows installer
+
+run-name: Windows installer ${{ inputs.tag }} [${{ inputs.request_id }}]
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact upstream OpenClaw release tag
+        required: true
+        type: string
+      request_id:
+        description: Unique identifier used by the local download script
+        required: true
+        type: string
+      patch_refs:
+        description: Optional space-separated full 40-char commit SHAs from clawd-ops/openclaw, cherry-picked in order onto the tag
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Validate inputs and resolve tag
+        id: resolve
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          REQUEST_ID: ${{ inputs.request_id }}
+          PATCH_REFS: ${{ inputs.patch_refs }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]{4}\.[1-9][0-9]*\.[1-9][0-9]*(-[1-9][0-9]*)?$ ]]
+          [[ "$REQUEST_ID" =~ ^[A-Za-z0-9._-]+$ ]]
+          for ref in $PATCH_REFS; do
+            [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid patch ref '${ref}'"; exit 1; }
+          done
+          # Tags may be annotated: dereference the tag object to its commit.
+          read -r obj_type obj_sha < <(gh api "repos/openclaw/openclaw/git/ref/tags/${RELEASE_TAG}" --jq '.object | "\(.type) \(.sha)"')
+          if [[ "$obj_type" == "tag" ]]; then
+            obj_sha=$(gh api "repos/openclaw/openclaw/git/tags/${obj_sha}" --jq '.object.sha')
+          fi
+          [[ "$obj_sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "commit=${obj_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact upstream release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: openclaw/openclaw
+          ref: ${{ steps.resolve.outputs.commit }}
+          persist-credentials: false
+
+      - name: Verify checked-out commit
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ steps.resolve.outputs.commit }}
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          if [[ "$head" != "$EXPECTED_COMMIT" ]]; then
+            echo "Checked-out commit '${head}' does not match tag commit '${EXPECTED_COMMIT}'"
+            exit 1
+          fi
+
+      - name: Apply patch refs
+        shell: bash
+        env:
+          PATCH_REFS: ${{ inputs.patch_refs }}
+        run: |
+          set -euo pipefail
+          : > "$RUNNER_TEMP/patch-refs.txt"
+          if [[ -z "${PATCH_REFS// /}" ]]; then
+            echo "none" > "$RUNNER_TEMP/patch-refs.txt"
+            exit 0
+          fi
+          git config user.name "personal-build"
+          git config user.email "personal-build@users.noreply.github.com"
+          for ref in $PATCH_REFS; do
+            [[ "$ref" =~ ^[0-9a-f]{40}$ ]]
+            # depth 2: the commit plus its parent, enough for cherry-pick.
+            git fetch --no-tags --depth=2 https://github.com/clawd-ops/openclaw.git "$ref"
+            [[ "$(git rev-parse FETCH_HEAD)" == "$ref" ]]
+            parents=$(git rev-list --parents -n 1 "$ref" | wc -w)
+            if [[ "$parents" -ne 2 ]]; then
+              echo "Patch ref ${ref} is not a single-parent commit"
+              exit 1
+            fi
+            if ! git cherry-pick "$ref"; then
+              echo "Cherry-pick of ${ref} conflicted"
+              git cherry-pick --abort || true
+              exit 1
+            fi
+            echo "$ref" >> "$RUNNER_TEMP/patch-refs.txt"
+          done
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Setup Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile --prefer-offline \
+            --config.ignore-scripts=false \
+            --config.engine-strict=false \
+            --config.enable-pre-post-scripts=true \
+            --config.side-effects-cache=true
+
+      - name: Build NSIS installer
+        working-directory: apps/linux/src-tauri
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          pnpm dlx @tauri-apps/cli@2.11.4 build --bundles nsis \
+            --config "{\"version\":\"${version}\",\"bundle\":{\"createUpdaterArtifacts\":false}}"
+
+      - name: Stage and verify installer
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          TAG_COMMIT: ${{ steps.resolve.outputs.commit }}
+          REQUEST_ID: ${{ inputs.request_id }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:RELEASE_TAG.Substring(1)
+          $installers = @(Get-ChildItem "apps/linux/src-tauri/target/release/bundle/nsis/*.exe")
+          if ($installers.Count -ne 1) {
+            throw "Expected one NSIS installer; found $($installers.Count)"
+          }
+          if (-not $installers[0].VersionInfo.ProductVersion.StartsWith($version)) {
+            throw "Installer version '$($installers[0].VersionInfo.ProductVersion)' does not match '$version'"
+          }
+          New-Item -ItemType Directory -Force -Path "dist/windows-app/release" | Out-Null
+          $name = "OpenClaw-$version-windows-x86_64.exe"
+          $target = "dist/windows-app/release/$name"
+          Copy-Item -LiteralPath $installers[0].FullName -Destination $target
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content -Encoding ascii "dist/windows-app/release/SHA256SUMS.windows-app.txt"
+          $patches = (Get-Content "$env:RUNNER_TEMP/patch-refs.txt") -join " "
+          $info = @(
+            "tag: $env:RELEASE_TAG",
+            "tag_commit: $env:TAG_COMMIT",
+            "request_id: $env:REQUEST_ID",
+            "patch_refs: $patches",
+            "installer: $name",
+            "sha256: $hash",
+            "signing: unsigned"
+          )
+          $info | Set-Content -Encoding ascii "dist/windows-app/release/BUILD-INFO.windows-app.txt"
+          $info | ForEach-Object { Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- $_" }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: openclaw-windows-${{ inputs.tag }}-${{ inputs.request_id }}
+          path: dist/windows-app/release/*
+          if-no-files-found: error
+          retention-days: 14
