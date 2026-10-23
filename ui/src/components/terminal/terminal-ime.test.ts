@@ -120,10 +120,46 @@ it("writes a commit once when a native compositionend with the same text follows
 it("writes a commit once when the native compositionend comes first", () => {
   mountGhostty();
   stop = installTerminalImeWorkaround(parent);
-  nativeCompositionEnd("漢");
   keydown(229);
+  nativeCompositionEnd("漢");
   beforeInput("insertText", "漢");
   expect(committed).toEqual(["漢"]);
+});
+
+it("writes a genuine repeat after a forwarded commit and a new composition", () => {
+  mountGhostty();
+  stop = installTerminalImeWorkaround(parent);
+  keydown(229);
+  beforeInput("insertText", "a");
+  textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+  nativeCompositionEnd("a");
+  expect(committed).toEqual(["a", "a"]);
+});
+
+it("writes a genuine repeat after a native-first commit and a new keydown", () => {
+  mountGhostty();
+  stop = installTerminalImeWorkaround(parent);
+  keydown(229);
+  nativeCompositionEnd("a");
+  keydown(229);
+  beforeInput("insertText", "a");
+  expect(committed).toEqual(["a", "a"]);
+});
+
+it("suppresses a late native compositionend at any delay, without timers", () => {
+  vi.useFakeTimers();
+  try {
+    mountGhostty();
+    stop = installTerminalImeWorkaround(parent);
+    keydown(229);
+    beforeInput("insertText", "a");
+    vi.setSystemTime(Date.now() + 3_600_000);
+    vi.advanceTimersByTime(3_600_000);
+    nativeCompositionEnd("a");
+    expect(committed).toEqual(["a"]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("keeps IME intent through an empty compositionend", () => {

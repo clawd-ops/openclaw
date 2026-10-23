@@ -1,11 +1,6 @@
 import { listen } from "../../lib/reactive/listener.ts";
 
 const IME_KEYDOWN_CODE = 229;
-// A commit can arrive both as beforeinput and as a native compositionend. The
-// counterpart follows within the same input turn; a later repeat is new typing.
-const NATIVE_COUNTERPART_MS = 100;
-const SYNTHETIC_COUNTERPART_MS = 1000;
-
 /** Bytes a soft keyboard commits through beforeinput instead of keydown. */
 function committedText(event: InputEvent): string | null {
   switch (event.inputType) {
@@ -30,10 +25,20 @@ function committedText(event: InputEvent): string | null {
  * own `compositionend` handler, which already writes `event.data` to the PTY.
  *
  * Some keyboards also finish with a native data-bearing `compositionend`, which
- * Ghostty would write a second time. Each committed string is therefore written
- * once: whichever path arrives second is dropped. Intent from a 229 keydown
- * persists until an unrelated key, because keyboards do not repeat it for every
- * commit and may end a composition with empty data.
+ * Ghostty would write a second time. Dedupe follows input transactions, not
+ * text or time. A transaction opens at a 229 keydown or `compositionstart` and
+ * lasts until the next such boundary or a non-IME keydown. Inside one, a commit
+ * forwarded from `beforeinput` suppresses the native `compositionend` that
+ * closes it (once, however late it arrives), and a native end that commits
+ * first suppresses the `insertText` for it (once). A boundary starts a fresh
+ * transaction, so an identical later commit is always written.
+ *
+ * Ambiguity that remains: a keyboard that reports one commit as keydown 229,
+ * `beforeinput`, then `compositionstart` and a native end with the same text, or
+ * a native end followed by a new 229 and `beforeinput` for the same commit, is
+ * indistinguishable from two genuine commits and is written twice. Intent from a
+ * 229 keydown persists through empty `compositionend` events because keyboards
+ * do not repeat it for every commit.
  *
  * Limited to Android with a coarse pointer, the platform where the defect was
  * observed; desktop IMEs, including touch-primary desktops, end compositions
@@ -56,58 +61,41 @@ export function installTerminalImeWorkaround(parent: HTMLElement): () => void {
   if (!probe.defaultPrevented) {
     return () => {};
   }
-  let imeIntent = false;
+  // The open input transaction; undefined means no IME intent.
+  let transaction: { forwarded?: string; native?: string } | undefined;
   let forwarding = false;
-  // Text one path wrote that the other path may still announce.
-  let written: { by: "native" | "forwarded"; text: string; at: number } | undefined;
-  const counterpartOf = (by: "native" | "forwarded", at: number) =>
-    written && written.by !== by
-      ? at - written.at <= (by === "native" ? SYNTHETIC_COUNTERPART_MS : NATIVE_COUNTERPART_MS)
-        ? written
-        : undefined
-      : undefined;
 
   const onKeyDown = (event: KeyboardEvent) => {
-    imeIntent = event.keyCode === IME_KEYDOWN_CODE || event.isComposing;
+    transaction = event.keyCode === IME_KEYDOWN_CODE || event.isComposing ? {} : undefined;
   };
   const onCompositionStart = () => {
-    imeIntent = true;
+    transaction = {};
   };
   const onCompositionEnd = (event: CompositionEvent) => {
-    if (forwarding || !event.data) {
+    if (forwarding || !transaction || !event.data) {
       return;
     }
-    const pending = counterpartOf("native", event.timeStamp);
-    if (pending && pending.text.endsWith(event.data)) {
-      // Already written from beforeinput; keep Ghostty from writing it again.
+    if (transaction.forwarded?.endsWith(event.data)) {
+      // beforeinput already wrote this commit; keep Ghostty from writing it again.
       event.stopImmediatePropagation();
-      written = undefined;
+      transaction.forwarded = undefined;
       return;
     }
-    written = { by: "native", text: event.data, at: event.timeStamp };
+    transaction.native = event.data;
   };
   const onBeforeInput = (event: InputEvent) => {
-    const data = imeIntent ? committedText(event) : null;
-    if (!data) {
+    const data = transaction ? committedText(event) : null;
+    if (!transaction || !data) {
       return;
     }
     const isText = event.inputType === "insertText";
-    const pending = isText ? counterpartOf("forwarded", event.timeStamp) : undefined;
-    if (pending?.text === data) {
-      // A native compositionend already wrote this commit.
-      written = undefined;
+    if (isText && transaction.native === data) {
+      // A native compositionend in this transaction already wrote this commit.
+      transaction.native = undefined;
       return;
     }
     if (isText) {
-      const previous = written?.by === "forwarded" ? written : undefined;
-      written = {
-        by: "forwarded",
-        text:
-          previous && event.timeStamp - previous.at <= SYNTHETIC_COUNTERPART_MS
-            ? previous.text + data
-            : data,
-        at: event.timeStamp,
-      };
+      transaction.forwarded = (transaction.forwarded ?? "") + data;
     }
     forwarding = true;
     try {
