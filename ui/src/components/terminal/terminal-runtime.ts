@@ -3,6 +3,7 @@ import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { t } from "../../i18n/index.ts";
 import { showToast } from "../../lib/toast.ts";
 import { observeTerminalFonts } from "./terminal-fonts.ts";
+import { installTerminalImeWorkaround } from "./terminal-ime.ts";
 
 function isEventListener(value: unknown): value is EventListener {
   return typeof value === "function";
@@ -69,6 +70,7 @@ export async function createIsolatedGhosttyTerminal(
   const terminal = controller.terminal;
   const measurement = new runtime.FitAddon();
   measurement.activate(terminal);
+  const stopImeWorkaround = installTerminalImeWorkaround(options.parent);
   let observer: ResizeObserver | undefined;
   // Ghostty ignores defaultPrevented; its custom handler returns true to consume.
   // App capture listeners own dock shortcuts before they can become PTY input.
@@ -95,6 +97,7 @@ export async function createIsolatedGhosttyTerminal(
     observer?.disconnect();
     stopObservingFonts?.();
     measurement.dispose();
+    stopImeWorkaround();
     // ghostty-web 0.4.0 clears isOpen before cleanup, skipping this listener removal.
     if (handleMouseUp) {
       document.removeEventListener("mouseup", handleMouseUp);
