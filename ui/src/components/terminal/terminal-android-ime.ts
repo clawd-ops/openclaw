@@ -59,6 +59,10 @@ export function installTerminalAndroidImeFix(): void {
   installAbort = abort;
 
   let imeActive = false;
+  // True between an interim insertCompositionText and the commit or end of that
+  // composition. Preedit is never forwarded, so a Backspace that edits it has
+  // nothing to delete in the PTY.
+  let preeditPending = false;
   listen(
     document,
     "keydown",
@@ -81,6 +85,15 @@ export function installTerminalAndroidImeFix(): void {
     "compositionstart",
     () => {
       imeActive = true;
+      preeditPending = false;
+    },
+    { capture: true, signal: abort.signal },
+  );
+  listen(
+    document,
+    "compositionend",
+    () => {
+      preeditPending = false;
     },
     { capture: true, signal: abort.signal },
   );
@@ -151,6 +164,11 @@ export function installTerminalAndroidImeFix(): void {
         }
         const ie = event as InputEvent;
         const t = ie.inputType;
+        if (t === "insertCompositionText") {
+          preeditPending = true;
+        } else if (t !== "deleteContentBackward") {
+          preeditPending = false;
+        }
         let data: string | null = null;
         // [P1] Only COMMITTED text. insertCompositionText /
         // insertFromComposition are interim preedit updates; forwarding
@@ -160,7 +178,7 @@ export function installTerminalAndroidImeFix(): void {
           data = ie.data;
         } else if (t === "insertLineBreak" || t === "insertParagraph") {
           data = "\r";
-        } else if (t === "deleteContentBackward") {
+        } else if (t === "deleteContentBackward" && !preeditPending) {
           data = "\x7f";
         }
         if (!data || data.length === 0) {

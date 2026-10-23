@@ -353,4 +353,89 @@ describe("installTerminalAndroidImeFix", () => {
     // oxlint-disable-next-line no-underscore-dangle -- asserting the shipped shim's literal flag name, not a naming choice here
     expect((window as unknown as Record<string, unknown>).__openclawTerminalImeShimV4).toBe(true);
   });
+
+  it("does not forward a Backspace that only edits uncommitted preedit", () => {
+    setCoarsePointer(true);
+    const { container } = buildGhosttyHost();
+    installTerminalAndroidImeFix();
+
+    const forwarded: string[] = [];
+    container.addEventListener("compositionend", (e) =>
+      forwarded.push((e as CompositionEvent).data),
+    );
+    const input = (inputType: string, data?: string) =>
+      container.dispatchEvent(
+        new InputEvent("beforeinput", {
+          inputType,
+          data,
+          isComposing: true,
+          bubbles: true,
+          composed: true,
+          cancelable: true,
+        }),
+      );
+
+    document.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    input("insertCompositionText", "teh");
+    input("deleteContentBackward");
+    input("insertText", "the");
+
+    expect(forwarded).toEqual(["the"]);
+  });
+
+  it("still forwards a Backspace inside a composition whose text was committed per key", () => {
+    setCoarsePointer(true);
+    const { container } = buildGhosttyHost();
+    installTerminalAndroidImeFix();
+
+    const forwarded: string[] = [];
+    container.addEventListener("compositionend", (e) =>
+      forwarded.push((e as CompositionEvent).data),
+    );
+    const input = (inputType: string, data?: string) =>
+      container.dispatchEvent(
+        new InputEvent("beforeinput", {
+          inputType,
+          data,
+          isComposing: true,
+          bubbles: true,
+          composed: true,
+          cancelable: true,
+        }),
+      );
+
+    document.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    input("insertText", "k");
+    input("deleteContentBackward");
+
+    expect(forwarded).toEqual(["k", "\x7f"]);
+  });
+
+  it("forwards Backspace after the composition has ended", () => {
+    setCoarsePointer(true);
+    const { container } = buildGhosttyHost();
+    installTerminalAndroidImeFix();
+
+    const forwarded: string[] = [];
+    container.addEventListener("compositionend", (e) =>
+      forwarded.push((e as CompositionEvent).data),
+    );
+    const input = (inputType: string, data?: string) =>
+      container.dispatchEvent(
+        new InputEvent("beforeinput", {
+          inputType,
+          data,
+          bubbles: true,
+          composed: true,
+          cancelable: true,
+        }),
+      );
+
+    document.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    input("insertCompositionText", "teh");
+    document.dispatchEvent(new CompositionEvent("compositionend", { data: "", bubbles: true }));
+    input("deleteContentBackward");
+
+    expect(forwarded).toEqual(["\x7f"]);
+  });
 });
