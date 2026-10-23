@@ -14,7 +14,9 @@
  * all.
  */
 
+import { listen } from "../../lib/reactive/listener.ts";
 import { isCoarsePointerDevice } from "./terminal-coarse-pointer.ts";
+import { descendantElements, firstDescendantByTag } from "./terminal-dom.ts";
 import { claimInstallFlag, releaseInstallFlagForTests } from "./terminal-shim-install-guard.ts";
 
 const KEY_ROW_TAG = "openclaw-terminal-key-row";
@@ -23,15 +25,15 @@ function isContainer(n: unknown): n is HTMLElement {
   if (!(n instanceof Element)) {
     return false;
   }
-  const textarea = n.querySelector("textarea");
-  return Boolean(n.querySelector("canvas") && textarea && textarea.parentElement === n);
+  const textarea = firstDescendantByTag(n, "textarea");
+  return Boolean(firstDescendantByTag(n, "canvas") && textarea && textarea.parentElement === n);
 }
 
 function collect(root: Document | ShadowRoot, depth: number, out: HTMLElement[]): HTMLElement[] {
-  if (depth > 12 || !root || typeof root.querySelectorAll !== "function") {
+  if (depth > 12 || !root || !("children" in root)) {
     return out;
   }
-  const all = root.querySelectorAll("*");
+  const all = descendantElements(root);
   for (const el of all) {
     if (isContainer(el)) {
       out.push(el);
@@ -88,7 +90,7 @@ function keyboardInset(): number {
 }
 
 function keyRow(): Element | null {
-  return document.querySelector(KEY_ROW_TAG);
+  return firstDescendantByTag(document, KEY_ROW_TAG);
 }
 
 function keyRowHeight(): number {
@@ -163,11 +165,12 @@ export function installTerminalKeyboardReserve(): void {
   };
 
   if (window.visualViewport) {
-    window.visualViewport.addEventListener("resize", schedule, { signal: abort.signal });
-    window.visualViewport.addEventListener("scroll", schedule, { signal: abort.signal });
+    listen(window.visualViewport, "resize", schedule, { signal: abort.signal });
+    listen(window.visualViewport, "scroll", schedule, { signal: abort.signal });
   }
-  document.addEventListener("focusin", schedule, { capture: true, signal: abort.signal });
-  document.addEventListener(
+  listen(document, "focusin", schedule, { capture: true, signal: abort.signal });
+  listen(
+    document,
     "focusout",
     () => {
       setTimeout(schedule, 0);
@@ -182,7 +185,7 @@ export function installTerminalKeyboardReserve(): void {
       attributes: true,
       attributeFilter: ["data-visible"],
     });
-    abort.signal.addEventListener("abort", () => observer.disconnect());
+    listen(abort.signal, "abort", () => observer.disconnect());
   } catch {
     /* observer optional */
   }
@@ -198,7 +201,7 @@ export function installTerminalKeyboardReserve(): void {
     containers: collect(document, 0, []).map((c) => ({
       pad: c.style.paddingBottom || "(none)",
       canvasH: Math.round(
-        (c.querySelector("canvas") as HTMLCanvasElement).getBoundingClientRect().height,
+        (firstDescendantByTag(c, "canvas") as HTMLCanvasElement).getBoundingClientRect().height,
       ),
     })),
   });

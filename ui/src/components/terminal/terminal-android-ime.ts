@@ -24,7 +24,9 @@
  * `handleCompositionEnd` via a synthetic `compositionend`.
  */
 
+import { listen } from "../../lib/reactive/listener.ts";
 import { isCoarsePointerDevice } from "./terminal-coarse-pointer.ts";
+import { firstDescendantByTag } from "./terminal-dom.ts";
 import { claimInstallFlag, releaseInstallFlagForTests } from "./terminal-shim-install-guard.ts";
 
 const INSTALL_FLAG = "__openclawTerminalImeShimV4";
@@ -57,7 +59,8 @@ export function installTerminalAndroidImeFix(): void {
   installAbort = abort;
 
   let imeActive = false;
-  document.addEventListener(
+  listen(
+    document,
     "keydown",
     (e) => {
       // keyCode 229 ("process key") is the measured signal Android soft
@@ -73,7 +76,8 @@ export function installTerminalAndroidImeFix(): void {
     },
     { capture: true, signal: abort.signal },
   );
-  document.addEventListener(
+  listen(
+    document,
     "compositionstart",
     () => {
       imeActive = true;
@@ -90,7 +94,7 @@ export function installTerminalAndroidImeFix(): void {
       }
       // Identify ghostty's container structurally instead of depending on
       // incidental contenteditable state.
-      if (node.querySelector("canvas") && node.querySelector("textarea")) {
+      if (firstDescendantByTag(node, "canvas") && firstDescendantByTag(node, "textarea")) {
         return node;
       }
     }
@@ -137,7 +141,8 @@ export function installTerminalAndroidImeFix(): void {
     return true;
   };
 
-  document.addEventListener(
+  listen(
+    document,
     "beforeinput",
     (event) => {
       try {

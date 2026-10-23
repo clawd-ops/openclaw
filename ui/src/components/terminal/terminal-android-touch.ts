@@ -23,6 +23,8 @@
  * missing translation layer.
  */
 
+import { listen } from "../../lib/reactive/listener.ts";
+import { firstDescendantByTag } from "./terminal-dom.ts";
 import { claimInstallFlag, releaseInstallFlagForTests } from "./terminal-shim-install-guard.ts";
 
 const MOVE_TOLERANCE_PX = 10;
@@ -189,7 +191,8 @@ export function installTerminalAndroidTouchFix(): void {
     }
   };
 
-  document.addEventListener(
+  listen(
+    document,
     "touchstart",
     (event) => {
       const te = event as TouchEvent;
@@ -243,7 +246,8 @@ export function installTerminalAndroidTouchFix(): void {
     { capture: true, passive: true, signal: abort.signal },
   );
 
-  document.addEventListener(
+  listen(
+    document,
     "touchmove",
     (event) => {
       const te = event as TouchEvent;
@@ -298,7 +302,8 @@ export function installTerminalAndroidTouchFix(): void {
     { capture: true, passive: false, signal: abort.signal },
   );
 
-  document.addEventListener(
+  listen(
+    document,
     "touchend",
     (event) => {
       if (!gesture) {
@@ -342,7 +347,8 @@ export function installTerminalAndroidTouchFix(): void {
     { capture: true, passive: true, signal: abort.signal },
   );
 
-  document.addEventListener(
+  listen(
+    document,
     "touchcancel",
     () => {
       cancelLongPress();
@@ -374,7 +380,8 @@ export function installTerminalAndroidTouchFix(): void {
   // This matters beyond typing: anything keyed on the terminal holding
   // focus, such as an accessory key row, cannot observe focus while it
   // lands on the container.
-  document.addEventListener(
+  listen(
+    document,
     "touchend",
     (event) => {
       try {
@@ -384,7 +391,7 @@ export function installTerminalAndroidTouchFix(): void {
         }
         event.stopPropagation();
         const container = canvas.parentElement;
-        const textarea = container && container.querySelector("textarea");
+        const textarea = container && firstDescendantByTag(container, "textarea");
         if (!textarea) {
           return;
         }
