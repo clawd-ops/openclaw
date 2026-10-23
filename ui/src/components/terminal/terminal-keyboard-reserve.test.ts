@@ -1,9 +1,6 @@
 /* @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  resetTerminalKeyboardReserveForTests,
-  installTerminalKeyboardReserve,
-} from "./terminal-keyboard-reserve.ts";
+import { installTerminalKeyboardReserve } from "./terminal-keyboard-reserve.ts";
 
 function setCoarsePointer(coarse: boolean): void {
   Object.defineProperty(navigator, "maxTouchPoints", { value: coarse ? 5 : 0, configurable: true });
@@ -63,6 +60,8 @@ async function flushRaf(): Promise<void> {
   });
 }
 
+const disposers: Array<() => void> = [];
+
 describe("installTerminalKeyboardReserve", () => {
   beforeEach(() => {
     Object.defineProperty(window, "innerHeight", {
@@ -82,7 +81,9 @@ describe("installTerminalKeyboardReserve", () => {
     // "coarse pointer" environment).
     Object.defineProperty(navigator, "maxTouchPoints", { value: 0, configurable: true });
     delete (window as unknown as Record<string, unknown>).matchMedia;
-    resetTerminalKeyboardReserveForTests();
+    for (const dispose of disposers.splice(0)) {
+      dispose();
+    }
   });
 
   it("no-ops on a non-touch device", async () => {
@@ -91,7 +92,7 @@ describe("installTerminalKeyboardReserve", () => {
     stubVisualViewport(363);
     Object.defineProperty(window, "innerHeight", { value: 676, configurable: true });
 
-    installTerminalKeyboardReserve();
+    disposers.push(installTerminalKeyboardReserve());
     await flushRaf();
 
     expect(container.style.paddingBottom).toBe("");
@@ -103,7 +104,7 @@ describe("installTerminalKeyboardReserve", () => {
     stubVisualViewport(363, 0, 1);
     Object.defineProperty(window, "innerHeight", { value: 676, configurable: true });
 
-    installTerminalKeyboardReserve();
+    disposers.push(installTerminalKeyboardReserve());
     await flushRaf();
 
     expect(container.style.paddingBottom).toBe("313px");
@@ -114,7 +115,7 @@ describe("installTerminalKeyboardReserve", () => {
     const { container } = buildGhosttyContainer();
     stubVisualViewport(800, 0, 1);
 
-    installTerminalKeyboardReserve();
+    disposers.push(installTerminalKeyboardReserve());
     await flushRaf();
 
     expect(container.style.paddingBottom).toBe("");
@@ -126,7 +127,7 @@ describe("installTerminalKeyboardReserve", () => {
     stubVisualViewport(457.5, 0, 2);
     Object.defineProperty(window, "innerHeight", { value: 915, configurable: true });
 
-    installTerminalKeyboardReserve();
+    disposers.push(installTerminalKeyboardReserve());
     await flushRaf();
 
     expect(container.style.paddingBottom).toBe("");
@@ -145,7 +146,7 @@ describe("installTerminalKeyboardReserve", () => {
     });
     document.body.appendChild(keyRow);
 
-    installTerminalKeyboardReserve();
+    disposers.push(installTerminalKeyboardReserve());
     await flushRaf();
 
     expect(container.style.paddingBottom).toBe("357px"); // 313 + 44
@@ -165,7 +166,7 @@ describe("installTerminalKeyboardReserve", () => {
     });
     document.body.appendChild(keyRow);
 
-    installTerminalKeyboardReserve();
+    disposers.push(installTerminalKeyboardReserve());
     await flushRaf();
 
     expect(container.style.paddingBottom).toBe("313px");
@@ -177,7 +178,7 @@ describe("installTerminalKeyboardReserve", () => {
     Object.defineProperty(window, "innerHeight", { value: 676, configurable: true });
     const vv = stubVisualViewport(363, 0, 1);
 
-    installTerminalKeyboardReserve();
+    disposers.push(installTerminalKeyboardReserve());
     await flushRaf();
     expect(container.style.paddingBottom).toBe("313px");
 
@@ -203,7 +204,7 @@ describe("installTerminalKeyboardReserve", () => {
     container.appendChild(textarea);
     root.appendChild(container);
 
-    installTerminalKeyboardReserve();
+    disposers.push(installTerminalKeyboardReserve());
     await flushRaf();
 
     expect(container.style.paddingBottom).toBe("313px");
@@ -215,8 +216,8 @@ describe("installTerminalKeyboardReserve", () => {
     const vv = stubVisualViewport(363, 0, 1);
     Object.defineProperty(window, "innerHeight", { value: 676, configurable: true });
 
-    installTerminalKeyboardReserve();
-    installTerminalKeyboardReserve();
+    disposers.push(installTerminalKeyboardReserve());
+    disposers.push(installTerminalKeyboardReserve());
     await flushRaf();
 
     expect(container.style.paddingBottom).toBe("313px");
@@ -251,7 +252,7 @@ describe("installTerminalKeyboardReserve", () => {
   it("uses the same window flag name as the shipped shim, so a coexisting legacy copy would defer to it", () => {
     setCoarsePointer(true);
     buildGhosttyContainer();
-    installTerminalKeyboardReserve();
+    disposers.push(installTerminalKeyboardReserve());
     // oxlint-disable-next-line no-underscore-dangle -- asserting the shipped shim's literal flag name, not a naming choice here
     expect((window as unknown as Record<string, unknown>).__openclawTerminalReserveV1).toBe(true);
   });
@@ -270,7 +271,7 @@ describe("installTerminalKeyboardReserve", () => {
     container.appendChild(wrapper);
     document.body.appendChild(container);
 
-    installTerminalKeyboardReserve();
+    disposers.push(installTerminalKeyboardReserve());
     await flushRaf();
 
     expect(container.style.paddingBottom).toBe("");

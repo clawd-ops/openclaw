@@ -47,22 +47,20 @@ type Gesture = {
 };
 
 const INSTALL_FLAG = "__openclawTerminalTouchFixV6";
-let installAbort: AbortController | null = null;
 
 /**
  * Installs the Android touch gesture workaround exactly once per page.
  * Idempotent: safe to call from every terminal instance's setup path.
  */
-export function installTerminalAndroidTouchFix(): void {
+export function installTerminalAndroidTouchFix(): () => void {
   if (!claimInstallFlag(INSTALL_FLAG)) {
-    return;
+    return () => {};
   }
 
   // Production never tears this down (install-once for the page's
   // lifetime, matching the original's `window[FLAG]` contract). The signal
   // exists so tests can fully uninstall between cases.
   const abort = new AbortController();
-  installAbort = abort;
 
   let gesture: Gesture | null = null;
 
@@ -80,6 +78,7 @@ export function installTerminalAndroidTouchFix(): void {
         container &&
         Array.from(container.children).some((child) => child.tagName === "TEXTAREA")
       ) {
+        // SAFETY: `node` was matched as a CANVAS element by tag name just above.
         return node as HTMLCanvasElement;
       }
     }
@@ -195,6 +194,7 @@ export function installTerminalAndroidTouchFix(): void {
     document,
     "touchstart",
     (event) => {
+      // SAFETY: Registered for a touch event type, so `event` is a TouchEvent.
       const te = event as TouchEvent;
       // Every path that discards a gesture must cancel its timer first, or
       // the old timer outlives the gesture it belonged to and arms the next
@@ -250,6 +250,7 @@ export function installTerminalAndroidTouchFix(): void {
     document,
     "touchmove",
     (event) => {
+      // SAFETY: Registered for a touch event type, so `event` is a TouchEvent.
       const te = event as TouchEvent;
       if (!gesture || te.touches.length !== 1) {
         return;
@@ -309,6 +310,7 @@ export function installTerminalAndroidTouchFix(): void {
       if (!gesture) {
         return;
       }
+      // SAFETY: Registered for a touch event type, so `event` is a TouchEvent.
       const te = event as TouchEvent;
       const ended = gesture;
       const touch = te.changedTouches && te.changedTouches[0];
@@ -397,6 +399,7 @@ export function installTerminalAndroidTouchFix(): void {
         }
         setTimeout(() => {
           try {
+            // SAFETY: `textarea` was found by the TEXTAREA tag lookup above.
             (textarea as HTMLTextAreaElement).focus();
           } catch {
             /* never break the page */
@@ -408,11 +411,10 @@ export function installTerminalAndroidTouchFix(): void {
     },
     { capture: true, passive: true, signal: abort.signal },
   );
-}
-
-/** Test-only: fully uninstalls (including document listeners) and resets the guard. */
-export function resetTerminalAndroidTouchFixForTests(): void {
-  installAbort?.abort();
-  installAbort = null;
-  releaseInstallFlagForTests(INSTALL_FLAG);
+  // Page-lifetime in production (the result is ignored); tests use it to
+  // uninstall between cases.
+  return () => {
+    abort.abort();
+    releaseInstallFlagForTests(INSTALL_FLAG);
+  };
 }

@@ -30,33 +30,33 @@ import { firstDescendantByTag } from "./terminal-dom.ts";
 import { claimInstallFlag, releaseInstallFlagForTests } from "./terminal-shim-install-guard.ts";
 
 const INSTALL_FLAG = "__openclawTerminalImeShimV4";
-let installAbort: AbortController | null = null;
 
 /**
  * Installs the Android IME workaround exactly once per page. Idempotent:
  * safe to call from every terminal instance's setup path.
  */
-export function installTerminalAndroidImeFix(): void {
+export function installTerminalAndroidImeFix(): () => void {
   // Matches the shipped shim: the flag is claimed BEFORE the touch gate, so
   // a non-touch device still permanently consumes the once-only install
   // (see terminal-key-row.ts for the one shim that does this the other way
   // around).
   if (!claimInstallFlag(INSTALL_FLAG)) {
-    return;
+    return () => {};
   }
 
   // [P1] Scope strictly to the broken path. On desktop, ghostty's keydown
   // route already works and a native compositionend still fires, so
   // forwarding here would deliver the same text twice for CJK input.
   if (!isCoarsePointerDevice()) {
-    return;
+    // The once-only flag stays claimed (matching the shipped shim); the
+    // disposer only lets tests release it.
+    return () => releaseInstallFlagForTests(INSTALL_FLAG);
   }
 
   // Production never tears this down (the shim is install-once for the
   // page's lifetime, matching the original's `window[FLAG]` contract). The
-  // signal exists so tests can fully uninstall between cases.
+  // returned disposer exists so tests can fully uninstall between cases.
   const abort = new AbortController();
-  installAbort = abort;
 
   let imeActive = false;
   // True between an interim insertCompositionText and the commit or end of that
@@ -71,7 +71,6 @@ export function installTerminalAndroidImeFix(): void {
       // keyboards send for this event (see the module doc comment); `.key`
       // is deprecated but this is the specific, verified detection this
       // shim depends on.
-      // oxlint-disable-next-line unicorn/prefer-keyboard-event-key -- measured Android IME keydown carries keyCode 229, not a reliable `.key` value
       if (e.keyCode === 229 || e.isComposing) {
         imeActive = true;
       } else if (e.key && e.key.length === 1) {
@@ -121,6 +120,7 @@ export function installTerminalAndroidImeFix(): void {
   const bugged = new WeakMap<Element, boolean>();
   const isBugPresent = (container: Element): boolean => {
     if (bugged.has(container)) {
+      // SAFETY: `has` just confirmed the WeakMap holds a boolean for this container.
       return bugged.get(container) as boolean;
     }
     let result: boolean;
@@ -162,6 +162,7 @@ export function installTerminalAndroidImeFix(): void {
         if (!imeActive) {
           return;
         }
+        // SAFETY: Registered for `beforeinput`, whose events are InputEvents.
         const ie = event as InputEvent;
         const t = ie.inputType;
         if (t === "insertCompositionText") {
@@ -191,11 +192,10 @@ export function installTerminalAndroidImeFix(): void {
     },
     { capture: true, signal: abort.signal }, // capture: ahead of ghostty's bubble-phase preventDefault
   );
-}
-
-/** Test-only: fully uninstalls (including document listeners) and resets the guard. */
-export function resetTerminalAndroidImeFixForTests(): void {
-  installAbort?.abort();
-  installAbort = null;
-  releaseInstallFlagForTests(INSTALL_FLAG);
+  // Page-lifetime in production (the result is ignored); tests use it to
+  // uninstall between cases.
+  return () => {
+    abort.abort();
+    releaseInstallFlagForTests(INSTALL_FLAG);
+  };
 }

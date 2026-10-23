@@ -1,9 +1,6 @@
 /* @vitest-environment jsdom */
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  resetTerminalAndroidImeFixForTests,
-  installTerminalAndroidImeFix,
-} from "./terminal-android-ime.ts";
+import { installTerminalAndroidImeFix } from "./terminal-android-ime.ts";
 
 function setCoarsePointer(coarse: boolean): void {
   Object.defineProperty(navigator, "maxTouchPoints", {
@@ -42,6 +39,8 @@ function buildGhosttyHost(): {
   return { host, container, textarea };
 }
 
+const disposers: Array<() => void> = [];
+
 describe("installTerminalAndroidImeFix", () => {
   afterEach(() => {
     document.body.innerHTML = "";
@@ -53,13 +52,15 @@ describe("installTerminalAndroidImeFix", () => {
     // "coarse pointer" environment).
     Object.defineProperty(navigator, "maxTouchPoints", { value: 0, configurable: true });
     delete (window as unknown as Record<string, unknown>).matchMedia;
-    resetTerminalAndroidImeFixForTests();
+    for (const dispose of disposers.splice(0)) {
+      dispose();
+    }
   });
 
   it("no-ops on a non-touch device", () => {
     setCoarsePointer(false);
     const { container } = buildGhosttyHost();
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
 
     let forwarded: CompositionEvent | undefined;
     container.addEventListener("compositionend", (e) => {
@@ -89,7 +90,7 @@ describe("installTerminalAndroidImeFix", () => {
   it("forwards a committed insertText beforeinput as compositionend on the ghostty container", () => {
     setCoarsePointer(true);
     const { container } = buildGhosttyHost();
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
 
     let forwarded: CompositionEvent | undefined;
     container.addEventListener("compositionend", (e) => {
@@ -115,7 +116,7 @@ describe("installTerminalAndroidImeFix", () => {
   it("maps insertParagraph to a carriage return and deleteContentBackward to DEL", () => {
     setCoarsePointer(true);
     const { container } = buildGhosttyHost();
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
 
     const forwarded: string[] = [];
     container.addEventListener("compositionend", (e) =>
@@ -149,7 +150,7 @@ describe("installTerminalAndroidImeFix", () => {
   it("does not forward while not in an IME-active window (single physical keydown, no 229)", () => {
     setCoarsePointer(true);
     const { container } = buildGhosttyHost();
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
 
     const forwarded: string[] = [];
     container.addEventListener("compositionend", (e) =>
@@ -175,7 +176,7 @@ describe("installTerminalAndroidImeFix", () => {
   it("ignores interim composition input types (insertCompositionText)", () => {
     setCoarsePointer(true);
     const { container } = buildGhosttyHost();
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
 
     const forwarded: string[] = [];
     container.addEventListener("compositionend", (e) =>
@@ -201,7 +202,7 @@ describe("installTerminalAndroidImeFix", () => {
   it("finds the container through an open shadow root via composedPath", () => {
     setCoarsePointer(true);
     const { container, textarea } = buildGhosttyHost();
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
 
     let forwarded: CompositionEvent | undefined;
     container.addEventListener("compositionend", (e) => (forwarded = e as CompositionEvent));
@@ -227,8 +228,8 @@ describe("installTerminalAndroidImeFix", () => {
   it("is idempotent: installing twice registers only one set of listeners", () => {
     setCoarsePointer(true);
     const { container } = buildGhosttyHost();
-    installTerminalAndroidImeFix();
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
+    disposers.push(installTerminalAndroidImeFix());
 
     const forwarded: string[] = [];
     container.addEventListener("compositionend", (e) =>
@@ -268,7 +269,7 @@ describe("installTerminalAndroidImeFix", () => {
     // No beforeinput listener here at all: ghostty "fixed upstream" never
     // cancels, so the probe's `defaultPrevented` comes back false.
 
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
     const forwarded: string[] = [];
     container.addEventListener("compositionend", (e) =>
       forwarded.push((e as CompositionEvent).data),
@@ -293,7 +294,7 @@ describe("installTerminalAndroidImeFix", () => {
   it("compositionstart alone (no prior 229 keydown) activates forwarding", () => {
     setCoarsePointer(true);
     const { container } = buildGhosttyHost();
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
 
     const forwarded: string[] = [];
     container.addEventListener("compositionend", (e) =>
@@ -317,7 +318,7 @@ describe("installTerminalAndroidImeFix", () => {
   it("a single-character physical keydown after 229 deactivates forwarding again", () => {
     setCoarsePointer(true);
     const { container } = buildGhosttyHost();
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
 
     const forwarded: string[] = [];
     container.addEventListener("compositionend", (e) =>
@@ -349,7 +350,7 @@ describe("installTerminalAndroidImeFix", () => {
   it("uses the same window flag name as the shipped shim, so a coexisting legacy copy would defer to it", () => {
     setCoarsePointer(true);
     buildGhosttyHost();
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
     // oxlint-disable-next-line no-underscore-dangle -- asserting the shipped shim's literal flag name, not a naming choice here
     expect((window as unknown as Record<string, unknown>).__openclawTerminalImeShimV4).toBe(true);
   });
@@ -357,7 +358,7 @@ describe("installTerminalAndroidImeFix", () => {
   it("does not forward a Backspace that only edits uncommitted preedit", () => {
     setCoarsePointer(true);
     const { container } = buildGhosttyHost();
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
 
     const forwarded: string[] = [];
     container.addEventListener("compositionend", (e) =>
@@ -386,7 +387,7 @@ describe("installTerminalAndroidImeFix", () => {
   it("still forwards a Backspace inside a composition whose text was committed per key", () => {
     setCoarsePointer(true);
     const { container } = buildGhosttyHost();
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
 
     const forwarded: string[] = [];
     container.addEventListener("compositionend", (e) =>
@@ -414,7 +415,7 @@ describe("installTerminalAndroidImeFix", () => {
   it("forwards Backspace after the composition has ended", () => {
     setCoarsePointer(true);
     const { container } = buildGhosttyHost();
-    installTerminalAndroidImeFix();
+    disposers.push(installTerminalAndroidImeFix());
 
     const forwarded: string[] = [];
     container.addEventListener("compositionend", (e) =>

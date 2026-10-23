@@ -103,27 +103,27 @@ function keyRowHeight(): number {
 }
 
 const INSTALL_FLAG = "__openclawTerminalReserveV1";
-let installAbort: AbortController | null = null;
 
 /**
  * Installs the keyboard-space reserve exactly once per page. Idempotent:
  * safe to call from every terminal instance's setup path.
  */
-export function installTerminalKeyboardReserve(): void {
+export function installTerminalKeyboardReserve(): () => void {
   // Matches the shipped shim: the flag is claimed BEFORE the touch gate.
   if (!claimInstallFlag(INSTALL_FLAG)) {
-    return;
+    return () => {};
   }
 
   if (!isCoarsePointerDevice()) {
-    return;
+    // The once-only flag stays claimed (matching the shipped shim); the
+    // disposer only lets tests release it.
+    return () => releaseInstallFlagForTests(INSTALL_FLAG);
   }
 
   // Production never tears this down (install-once for the page's
   // lifetime, matching the original's `window[FLAG]` contract). The signal
   // exists so tests can fully uninstall between cases.
   const abort = new AbortController();
-  installAbort = abort;
 
   const apply = (): void => {
     const kb = keyboardInset();
@@ -194,22 +194,23 @@ export function installTerminalKeyboardReserve(): void {
   // Debug/introspection accessor, ported verbatim from the shim (including
   // its name) for on-device debugging parity. Not used by any production
   // code path.
-  // oxlint-disable-next-line no-underscore-dangle -- matches the shipped shim's window.__ocReserveState name exactly, for on-device debugging continuity
-  (window as unknown as Record<string, unknown>).__ocReserveState = () => ({
-    keyboardInset: keyboardInset(),
-    keyRowHeight: keyRowHeight(),
-    containers: collect(document, 0, []).map((c) => ({
-      pad: c.style.paddingBottom || "(none)",
-      canvasH: Math.round(
-        (firstDescendantByTag(c, "canvas") as HTMLCanvasElement).getBoundingClientRect().height,
-      ),
-    })),
+  Object.assign(window, {
+    __ocReserveState: () => ({
+      keyboardInset: keyboardInset(),
+      keyRowHeight: keyRowHeight(),
+      containers: collect(document, 0, []).map((c) => ({
+        pad: c.style.paddingBottom || "(none)",
+        canvasH: Math.round(
+          // SAFETY: `collect` only returns containers that own a CANVAS element.
+          (firstDescendantByTag(c, "canvas") as HTMLCanvasElement).getBoundingClientRect().height,
+        ),
+      })),
+    }),
   });
-}
-
-/** Test-only: fully uninstalls (including listeners/observer) and resets the guard. */
-export function resetTerminalKeyboardReserveForTests(): void {
-  installAbort?.abort();
-  installAbort = null;
-  releaseInstallFlagForTests(INSTALL_FLAG);
+  // Page-lifetime in production (the result is ignored); tests use it to
+  // uninstall between cases.
+  return () => {
+    abort.abort();
+    releaseInstallFlagForTests(INSTALL_FLAG);
+  };
 }

@@ -12,6 +12,7 @@
  * duplicate synthetic events, duplicate observers.
  */
 export function claimInstallFlag(flagName: string): boolean {
+  // SAFETY: `window` is widened only to read and write the page-global flag by name.
   const w = window as unknown as Record<string, unknown>;
   if (w[flagName]) {
     return false;
@@ -22,5 +23,6 @@ export function claimInstallFlag(flagName: string): boolean {
 
 /** Test-only: clears a claimed flag so a fresh install can be simulated. */
 export function releaseInstallFlagForTests(flagName: string): void {
+  // SAFETY: `window` is widened only to delete the page-global flag by name.
   delete (window as unknown as Record<string, unknown>)[flagName];
 }

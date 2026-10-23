@@ -1,9 +1,6 @@
 /* @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  resetTerminalAndroidTouchFixForTests,
-  installTerminalAndroidTouchFix,
-} from "./terminal-android-touch.ts";
+import { installTerminalAndroidTouchFix } from "./terminal-android-touch.ts";
 
 function buildGhosttyHost(): {
   host: HTMLElement;
@@ -55,6 +52,8 @@ function touchEvent(
   });
 }
 
+const disposers: Array<() => void> = [];
+
 describe("installTerminalAndroidTouchFix", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
@@ -63,12 +62,14 @@ describe("installTerminalAndroidTouchFix", () => {
   afterEach(() => {
     vi.useRealTimers();
     document.body.innerHTML = "";
-    resetTerminalAndroidTouchFixForTests();
+    for (const dispose of disposers.splice(0)) {
+      dispose();
+    }
   });
 
   it("quick tap: synthesizes a click with ctrlKey on the canvas (link activation)", () => {
     const { canvas } = buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
 
     const clicks: MouseEvent[] = [];
     canvas.addEventListener("click", (e) => clicks.push(e as MouseEvent));
@@ -84,7 +85,7 @@ describe("installTerminalAndroidTouchFix", () => {
 
   it("tap-to-focus: defers focusing the hidden textarea by one task", () => {
     const { host, canvas, textarea } = buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
 
     const t = makeTouch({ clientX: 5, clientY: 5, target: canvas });
     canvas.dispatchEvent(touchEvent("touchstart", canvas, [t]));
@@ -111,7 +112,7 @@ describe("installTerminalAndroidTouchFix", () => {
     canvas.addEventListener("touchend", () => {
       ghosttyTouchEndRan = true;
     });
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
 
     const t = makeTouch({ clientX: 5, clientY: 5, target: canvas });
     canvas.dispatchEvent(touchEvent("touchstart", canvas, [t]));
@@ -122,7 +123,7 @@ describe("installTerminalAndroidTouchFix", () => {
 
   it("drag without a long press: scrolls via a wheel event on the container, not a selection", () => {
     const { canvas, container } = buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
 
     const wheels: WheelEvent[] = [];
     container.addEventListener("wheel", (e) => wheels.push(e as WheelEvent));
@@ -140,7 +141,7 @@ describe("installTerminalAndroidTouchFix", () => {
 
   it("long press then drag: begins a mouse-based selection instead of scrolling", () => {
     const { canvas } = buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
 
     const mouseEvents: string[] = [];
     canvas.addEventListener("mousedown", () => mouseEvents.push("mousedown"));
@@ -158,7 +159,7 @@ describe("installTerminalAndroidTouchFix", () => {
 
   it("long press released without moving: no click, no selection (Android paste bubble stands)", () => {
     const { canvas } = buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
 
     const clicks: MouseEvent[] = [];
     canvas.addEventListener("click", (e) => clicks.push(e as MouseEvent));
@@ -173,7 +174,7 @@ describe("installTerminalAndroidTouchFix", () => {
 
   it("selecting through touchend: finishes with a mousemove + mouseup", () => {
     const { canvas } = buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
 
     const mouseEvents: string[] = [];
     canvas.addEventListener("mousedown", () => mouseEvents.push("mousedown"));
@@ -192,7 +193,7 @@ describe("installTerminalAndroidTouchFix", () => {
 
   it("touchcancel while selecting: finishes the selection instead of leaving it dangling", () => {
     const { canvas } = buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
 
     const mouseEvents: string[] = [];
     canvas.addEventListener("mouseup", () => mouseEvents.push("mouseup"));
@@ -212,7 +213,7 @@ describe("installTerminalAndroidTouchFix", () => {
     const otherCanvas = document.createElement("canvas");
     otherContainer.appendChild(otherCanvas); // no sibling textarea -> not ghostty's shape
     document.body.appendChild(otherContainer);
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
 
     const clicks: MouseEvent[] = [];
     otherCanvas.addEventListener("click", (e) => clicks.push(e as MouseEvent));
@@ -226,7 +227,7 @@ describe("installTerminalAndroidTouchFix", () => {
 
   it("multi-touch (pinch) start clears any in-progress gesture", () => {
     const { canvas } = buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
 
     const clicks: MouseEvent[] = [];
     canvas.addEventListener("click", (e) => clicks.push(e as MouseEvent));
@@ -241,7 +242,7 @@ describe("installTerminalAndroidTouchFix", () => {
 
   it("exact 10px tolerance boundary: dy=10 from start does not count as moved", () => {
     const { canvas, container } = buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
     const wheels: WheelEvent[] = [];
     container.addEventListener("wheel", (e) => wheels.push(e as WheelEvent));
 
@@ -260,7 +261,7 @@ describe("installTerminalAndroidTouchFix", () => {
 
   it("wheel quantization: a single large move flushes multiple ±5-step quanta in one pass, bounded by the 8-iteration guard", () => {
     const { canvas, container } = buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
     const wheelDeltas: number[] = [];
     container.addEventListener("wheel", (e) => wheelDeltas.push((e as WheelEvent).deltaY));
 
@@ -280,7 +281,7 @@ describe("installTerminalAndroidTouchFix", () => {
 
   it("small sub-quantum drags accumulate residual across moves instead of being dropped", () => {
     const { canvas, container } = buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
     const wheelDeltas: number[] = [];
     container.addEventListener("wheel", (e) => wheelDeltas.push((e as WheelEvent).deltaY));
 
@@ -298,7 +299,7 @@ describe("installTerminalAndroidTouchFix", () => {
 
   it("non-cancelable touchmove is not rejected (Chrome intervention guard)", () => {
     const { canvas } = buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
 
     const t0 = makeTouch({ clientX: 100, clientY: 100, target: canvas });
     canvas.dispatchEvent(touchEvent("touchstart", canvas, [t0]));
@@ -309,7 +310,7 @@ describe("installTerminalAndroidTouchFix", () => {
 
   it("a stale long-press timer from a discarded gesture does not arm the next gesture", () => {
     const { canvas } = buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
     const mouseEvents: string[] = [];
     canvas.addEventListener("mousedown", () => mouseEvents.push("mousedown"));
 
@@ -336,7 +337,7 @@ describe("installTerminalAndroidTouchFix", () => {
 
   it("uses the same window flag name as the shipped shim, so a coexisting legacy copy would defer to it", () => {
     buildGhosttyHost();
-    installTerminalAndroidTouchFix();
+    disposers.push(installTerminalAndroidTouchFix());
     // oxlint-disable-next-line no-underscore-dangle -- asserting the shipped shim's literal flag name, not a naming choice here
     expect((window as unknown as Record<string, unknown>).__openclawTerminalTouchFixV6).toBe(true);
   });
