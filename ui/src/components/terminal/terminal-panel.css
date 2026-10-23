@@ -541,7 +541,7 @@ openclaw-terminal-panel {
     position: absolute;
     inset: 0;
     z-index: 0;
-    padding: 6px 8px;
+    padding: 6px 8px calc(6px + var(--tp-keyboard-reserve, 0px));
     caret-color: transparent;
   }
   .tp-error {

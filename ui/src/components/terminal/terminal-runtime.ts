@@ -3,6 +3,7 @@ import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { t } from "../../i18n/index.ts";
 import { showToast } from "../../lib/toast.ts";
 import { observeTerminalFonts } from "./terminal-fonts.ts";
+import { observeTerminalKeyboardReserve } from "./terminal-keyboard-reserve.ts";
 
 function isEventListener(value: unknown): value is EventListener {
   return typeof value === "function";
@@ -75,6 +76,7 @@ export async function createIsolatedGhosttyTerminal(
   terminal.attachCustomKeyEventHandler((event) => event.defaultPrevented);
   const mouseUpCandidate = asOptionalRecord(terminal)?.handleMouseUp;
   let handleMouseUp = isEventListener(mouseUpCandidate) ? mouseUpCandidate : undefined;
+  const stopKeyboardReserve = observeTerminalKeyboardReserve(options.parent);
   let stopObservingFonts: (() => void) | undefined;
   // Ghostty 0.4.0 drops resize notifications during its 50ms fit lock. Measure
   // through its public addon, but let one owner apply every final layout size.
@@ -94,6 +96,7 @@ export async function createIsolatedGhosttyTerminal(
     disposed = true;
     observer?.disconnect();
     stopObservingFonts?.();
+    stopKeyboardReserve();
     measurement.dispose();
     // ghostty-web 0.4.0 clears isOpen before cleanup, skipping this listener removal.
     if (handleMouseUp) {
