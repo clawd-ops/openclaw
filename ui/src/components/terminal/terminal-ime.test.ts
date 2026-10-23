@@ -7,7 +7,12 @@ let textarea: HTMLTextAreaElement;
 let stop: (() => void) | undefined;
 let committed: string[];
 
-function setPointer(coarse: boolean) {
+function setPointer(coarse: boolean, android = true) {
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+    android
+      ? "Mozilla/5.0 (Linux; Android 15) Chrome/140 Mobile"
+      : "Mozilla/5.0 (Windows NT 10.0) Chrome/140",
+  );
   vi.stubGlobal("matchMedia", () => ({ matches: coarse }) as MediaQueryList);
   Object.defineProperty(navigator, "maxTouchPoints", { value: coarse ? 5 : 0, configurable: true });
 }
@@ -50,7 +55,12 @@ afterEach(() => {
   stop = undefined;
   parent.remove();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
+
+function nativeCompositionEnd(data: string) {
+  textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data }));
+}
 
 it("delivers soft-keyboard text after an IME keydown", () => {
   mountGhostty();
@@ -95,5 +105,61 @@ it("stops forwarding after cleanup", () => {
   installTerminalImeWorkaround(parent)();
   keydown(229);
   beforeInput("insertText", "k");
+  expect(committed).toEqual([]);
+});
+
+it("writes a commit once when a native compositionend with the same text follows", () => {
+  mountGhostty();
+  stop = installTerminalImeWorkaround(parent);
+  keydown(229);
+  beforeInput("insertText", "漢");
+  nativeCompositionEnd("漢");
+  expect(committed).toEqual(["漢"]);
+});
+
+it("writes a commit once when the native compositionend comes first", () => {
+  mountGhostty();
+  stop = installTerminalImeWorkaround(parent);
+  nativeCompositionEnd("漢");
+  keydown(229);
+  beforeInput("insertText", "漢");
+  expect(committed).toEqual(["漢"]);
+});
+
+it("keeps IME intent through an empty compositionend", () => {
+  mountGhostty();
+  stop = installTerminalImeWorkaround(parent);
+  keydown(229);
+  nativeCompositionEnd("");
+  beforeInput("insertText", "漢");
+  expect(committed).toEqual(["漢"]);
+});
+
+it("delivers Backspace after a composition without a new IME keydown", () => {
+  mountGhostty();
+  stop = installTerminalImeWorkaround(parent);
+  keydown(229);
+  beforeInput("insertText", "漢");
+  nativeCompositionEnd("漢");
+  beforeInput("deleteContentBackward");
+  expect(committed).toEqual(["漢", "\x7f"]);
+});
+
+it("still writes a repeated character typed twice", () => {
+  mountGhostty();
+  stop = installTerminalImeWorkaround(parent);
+  keydown(229);
+  beforeInput("insertText", "a");
+  keydown(229);
+  beforeInput("insertText", "a");
+  expect(committed).toEqual(["a", "a"]);
+});
+
+it("does nothing on a touch-primary desktop browser", () => {
+  setPointer(true, false);
+  mountGhostty();
+  stop = installTerminalImeWorkaround(parent);
+  keydown(229);
+  beforeInput("insertText", "漢");
   expect(committed).toEqual([]);
 });
