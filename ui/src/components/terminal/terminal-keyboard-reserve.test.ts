@@ -8,7 +8,9 @@ let frames: FrameRequestCallback[];
 let disconnect: (() => void) | undefined;
 let stop: (() => void) | undefined;
 let host: HTMLElement;
+let hostTop: number;
 let hostBottom: number;
+let editor: HTMLTextAreaElement;
 
 const reserve = () => host.style.getPropertyValue("--tp-keyboard-reserve");
 
@@ -24,14 +26,17 @@ beforeEach(() => {
   // Galaxy Z Fold6 in Chrome: the layout viewport stays at 676 with the keyboard open.
   viewport = Object.assign(new EventTarget(), { height: 676, offsetTop: 0, scale: 1 });
   frames = [];
+  hostTop = 0;
   hostBottom = 676;
   vi.stubGlobal("visualViewport", viewport);
   vi.stubGlobal("innerHeight", 676);
   vi.stubGlobal("innerWidth", 360);
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
   host = document.body.appendChild(document.createElement("div"));
-  host.getBoundingClientRect = () => ({ bottom: hostBottom }) as DOMRect;
+  host.getBoundingClientRect = () => ({ top: hostTop, bottom: hostBottom }) as DOMRect;
   disconnect = connectShellViewport();
+  editor = document.body.appendChild(document.createElement("textarea"));
+  editor.focus();
   stop = observeTerminalKeyboardReserve(host);
 });
 
@@ -40,6 +45,7 @@ afterEach(() => {
   disconnect?.();
   stop = disconnect = undefined;
   host.remove();
+  editor.remove();
   vi.unstubAllGlobals();
 });
 
@@ -68,5 +74,32 @@ it("clears the reserve on cleanup", () => {
   stop = undefined;
   expect(reserve()).toBe("");
   resize({ height: 300 });
+  expect(reserve()).toBe("");
+});
+
+it("does not reserve for a host below the fold when no keyboard is open", () => {
+  hostTop = 800;
+  hostBottom = 1200;
+  resize({ height: 676 });
+  expect(reserve()).toBe("");
+});
+
+it("does not reserve for a host entirely below the visible viewport", () => {
+  hostTop = 800;
+  hostBottom = 1200;
+  resize({ height: 363 });
+  expect(reserve()).toBe("");
+});
+
+it("does not reserve for a browser-chrome gap without a keyboard", () => {
+  resize({ height: 616 });
+  expect(reserve()).toBe("");
+});
+
+it("drops a stale reserve when scrolling moves the host above the keyboard", () => {
+  resize({ height: 363 });
+  expect(reserve()).toBe("313px");
+  hostBottom = 363;
+  window.dispatchEvent(new Event("scroll"));
   expect(reserve()).toBe("");
 });

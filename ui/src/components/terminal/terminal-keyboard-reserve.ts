@@ -1,4 +1,5 @@
 import { shellViewport } from "../../app/shell-viewport.ts";
+import { listen } from "../../lib/reactive/listener.ts";
 
 const TERMINAL_KEYBOARD_RESERVE_PROPERTY = "--tp-keyboard-reserve";
 
@@ -13,18 +14,27 @@ const TERMINAL_KEYBOARD_RESERVE_PROPERTY = "--tp-keyboard-reserve";
  * keyboard. Ghostty's fit reads the host's content box, so padding the host by
  * the covered height is enough to refit it.
  *
- * The inset is the part of the host below the visual viewport, not the raw
- * layout/visual difference: a terminal inside the shell is already sized by
- * `--shell-viewport-height` and must not be shortened twice. Pinch zoom
- * changes that difference without a keyboard, so the shell's native-scale flag
- * gates it.
+ * Only applies while the shell detects an open keyboard (an editable has focus
+ * and the visual viewport is at least 80px shorter), so browser-chrome gaps
+ * never reserve space. The inset is the part of the host's visible extent below
+ * the visual viewport: a terminal the shell already sizes to `visualViewport`
+ * is not shortened twice, and a host scrolled entirely under the keyboard or
+ * below the fold gets nothing. Scrolling moves the host without a viewport
+ * event, so scroll in any container recomputes it. Pinch zoom changes the
+ * height difference without a keyboard, so the shell's native-scale flag gates
+ * the keyboard detection.
  */
 export function observeTerminalKeyboardReserve(host: HTMLElement): () => void {
   const update = () => {
     const viewport = shellViewport.snapshot;
-    const covered = viewport?.nativeScale
-      ? host.getBoundingClientRect().bottom - (viewport.offsetTop + viewport.height)
-      : 0;
+    let covered = 0;
+    if (viewport?.keyboardVisible) {
+      const rect = host.getBoundingClientRect();
+      const visibleBottom = viewport.offsetTop + viewport.height;
+      if (rect.top < visibleBottom) {
+        covered = Math.min(rect.bottom, viewport.layoutHeight) - visibleBottom;
+      }
+    }
     if (covered > 1) {
       host.style.setProperty(TERMINAL_KEYBOARD_RESERVE_PROPERTY, `${Math.round(covered)}px`);
     } else {
@@ -32,9 +42,13 @@ export function observeTerminalKeyboardReserve(host: HTMLElement): () => void {
     }
   };
   update();
-  const stop = shellViewport.subscribe(update);
+  const stops = [
+    shellViewport.subscribe(update),
+    // Scroll does not bubble; capture sees every scroll container.
+    listen(window, "scroll", update, { capture: true, passive: true }),
+  ];
   return () => {
-    stop();
+    stops.forEach((stop) => stop());
     host.style.removeProperty(TERMINAL_KEYBOARD_RESERVE_PROPERTY);
   };
 }
