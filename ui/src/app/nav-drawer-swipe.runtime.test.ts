@@ -82,3 +82,42 @@ it("preserves menu focus when gesture support connects to an open drawer", () =>
 
   expect(document.activeElement).toBe(selected);
 });
+
+// A canvas paints its own selection or pointer, so a rightward drag belongs to it.
+it.each([
+  ["canvas", false],
+  ["div", true],
+])("a rightward drag over <%s> opens the drawer: %s", (tag, opens) => {
+  const element = document.createElement("div");
+  host = element;
+  element.innerHTML = `<div class="content"><${tag}></${tag}></div><nav class="shell-nav"></nav>`;
+  document.body.append(element);
+  const open = vi.fn();
+  owner = new NavDrawerSwipeOwner(
+    {
+      element,
+      navDrawerElement: element.querySelector<HTMLElement>(".shell-nav") ?? undefined,
+      get isConnected() {
+        return element.isConnected;
+      },
+      onboardingMode: false,
+      navDrawerOpen: false,
+    },
+    open,
+  );
+  owner.connect();
+  const target = element.querySelector(tag)!;
+  const touch = (type: string, x: number) => {
+    const event = new Event(type, { bubbles: true, cancelable: true, composed: true });
+    const points = [{ identifier: 1, clientX: x, clientY: 100 }];
+    Object.defineProperties(event, {
+      touches: { value: type === "touchend" ? [] : points },
+      changedTouches: { value: points },
+    });
+    target.dispatchEvent(event);
+  };
+  touch("touchstart", 100);
+  touch("touchmove", 200);
+  touch("touchend", 200);
+  expect(open).toHaveBeenCalledTimes(opens ? 1 : 0);
+});

@@ -5,6 +5,12 @@ const MIN_OPEN_DISTANCE_PX = 44;
 const OPEN_RATIO = 0.15;
 const LOCK_DISTANCE_PX = 7;
 const DIRECTION_RATIO = 1.25;
+// Elements that own their own horizontal drag. `canvas` covers surfaces that
+// paint their own selection or pointer instead of using DOM text, such as the
+// terminal and the desktop view. They have no matching ancestor: the hidden
+// textarea a terminal keeps for IME is a sibling of its canvas, not a parent.
+const SWIPE_OPT_OUT_SELECTOR =
+  "a, button, canvas, input, textarea, select, pre, [role='slider'], [contenteditable]:not([contenteditable='false'])";
 
 type Swipe = {
   identifier: number;
@@ -85,11 +91,7 @@ export class NavDrawerSwipeOwner {
       if (!(target instanceof Element)) {
         return false;
       }
-      if (
-        target.matches(
-          "a, button, input, textarea, select, pre, [role='slider'], [contenteditable]:not([contenteditable='false'])",
-        )
-      ) {
+      if (target.matches(SWIPE_OPT_OUT_SELECTOR)) {
         return true;
       }
       return target instanceof HTMLElement && target.scrollWidth > target.clientWidth + 1;
